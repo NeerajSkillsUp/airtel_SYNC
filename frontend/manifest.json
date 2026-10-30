@@ -1,0 +1,9 @@
+{
+  "name": "Udyam Digital",
+  "short_name": "Udyam Digital",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f7f9",
+  "theme_color": "#e40000"
+}
