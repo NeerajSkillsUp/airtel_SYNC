@@ -1,6 +1,12 @@
+from __future__ import annotations
+import concurrent.futures
+from dotenv import load_dotenv
+load_dotenv()
+import asyncio
 """Catalogue-grounded assistant with optional local Ollama generation."""
 
-from __future__ import annotations
+from google import genai
+from google.genai import errors, types
 
 import json
 import logging
@@ -173,40 +179,36 @@ class ChatService:
         )
 
     def _generate_locally(self, prompt: str) -> str | None:
-        if not self.model:
-            return None
-        payload = json.dumps(
-            {"model": self.model, "prompt": prompt, "stream": False}
-        ).encode("utf-8")
-        try:
-            endpoint = urlsplit(self.ollama_url)
-        except ValueError as error:
-            logger.warning("Invalid local Ollama URL; using catalogue fallback: %s", error)
-            return None
-        if endpoint.scheme != "http" or endpoint.hostname not in {
-            "127.0.0.1",
-            "localhost",
-            "::1",
-        }:
-            logger.warning("Ollama URL must use a loopback host; using catalogue fallback.")
-            return None
-        request = urllib.request.Request(
-            self.ollama_url,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=8) as response:
-                body = json.loads(response.read().decode("utf-8"))
-            if not isinstance(body, dict):
-                return None
-            answer = body.get("response")
-            return answer.strip() if isinstance(answer, str) and answer.strip() else None
-        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
-            logger.warning("Local Ollama chat generation failed: %s", error)
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            logger.error("GEMINI_API_KEY environment variable is not set.")
             return None
 
+        client = genai.Client(api_key=api_key)
+        candidate_models = [
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite",
+            "gemini-flash-lite-latest",
+            "gemini-2.5-flash-lite",
+            "gemini-3.8-flash"
+        ]
+
+        for model_name in candidate_models:
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        max_output_tokens=600,
+                        http_options=types.HttpOptions(timeout=15000)
+                    )
+                )
+                if response and response.text:
+                    return response.text.strip()
+            except Exception as error:
+                logger.warning("Model %s unavailable/failed: %s", model_name, error)
+                continue
+        return None
     @staticmethod
     def _fallback_answer(
         message: str, language: str, products: list[dict[str, Any]]
